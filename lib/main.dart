@@ -60,6 +60,8 @@ class _HomeShellState extends State<HomeShell> {
   final Set<int> _revealedPanels = {};
   String? _backgroundImagePath;
   final List<String> _clearedImages = [];
+  static const String _progressKey = 'progress_count';
+  int _progressCount = 0;
 
   // UI
   final TextEditingController _controller = TextEditingController();
@@ -91,6 +93,7 @@ class _HomeShellState extends State<HomeShell> {
     await _loadPanels();
     await _loadBackground();
     await _loadGallery();
+    await _loadProgress();
   }
 
   // ===== Tasks =====
@@ -138,18 +141,37 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _toggleTask(int index, bool value) async {
+    final before = _tasks[index].done;
+
     setState(() {
       _tasks[index].done = value;
+      if (!before && value) {
+        _progressCount++;
+      } else if (before && !value) {
+        _progressCount--;
+        if (_progressCount < 0) _progressCount = 0;
+      }
     });
 
     await _saveTasks();
+    await _saveProgress();
 
-    final completed = _tasks.where((t) => t.done).length;
     final totalPanels = rows * cols;
-
-    if (completed >= totalPanels) {
+    if (_progressCount >= totalPanels) {
       _onAllPanelsCleared();
     }
+  }
+
+  Future<void> _loadProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _progressCount = prefs.getInt(_progressKey) ?? 0;
+    });
+  }
+
+  Future<void> _saveProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_progressKey, _progressCount);
   }
 
   // ===== Background =====
@@ -314,6 +336,7 @@ class _HomeShellState extends State<HomeShell> {
       _revealedPanels.clear();
       _backgroundImagePath = null;
       _clearedImages.clear();
+      _progressCount = 0;
     });
   }
 
@@ -366,7 +389,7 @@ class _HomeShellState extends State<HomeShell> {
             revealedPanels: _revealedPanels,
             rows: rows,
             cols: cols,
-            completedCount: _tasks.where((t) => t.done).length,
+            completedCount: _progressCount,
             totalCount: _tasks.length,
           ),
           GalleryPage(images: _clearedImages),
