@@ -1,16 +1,41 @@
-# my_app
+# Flutter ToDo App (Windows Desktop)
 
-A new Flutter project.
+A simple ToDo list application built with Flutter for Windows desktop.
+This application allows users to add and delete.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## Features
 
-A few resources to get you started if this is your first Flutter project:
+- Add new tasks
+- Delete tasks
+- Local persistence using shared_preferences
+- Tasks remain after application restart
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Tech Stack
+
+- Flutter
+- Dart
+- shared_preferences
+- Windows Desktop
+- Material 3
+
+---
+
+## Technical Notes
+
+- Implemented asynchronous processing using Future and async/await to prevent UI blocking.
+- Managed application state using StatefulWidget.
+- Ensured data persistence using shared_preferences.
+- Handled Material 3 AppBar surface tint behavior when customizing the AppBar color.
+
+
+---
+
+## How to Run
+
+```bash
+flutter pub get
+flutter run -d windows
