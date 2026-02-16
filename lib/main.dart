@@ -24,7 +24,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// ===== Model =====
 class Todo {
   final String id;
   final String title;
@@ -43,7 +42,6 @@ class Todo {
   }
 }
 
-/// ===== HomeShell: state + tabs =====
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -52,10 +50,8 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  // Tabs
   int _index = 0;
 
-  // Data
   final List<Todo> _tasks = [];
   final Set<int> _revealedPanels = {};
   String? _backgroundImagePath;
@@ -63,17 +59,18 @@ class _HomeShellState extends State<HomeShell> {
   static const String _progressKey = 'progress_count';
   int _progressCount = 0;
 
-  // UI
+  static const String _panelOrderKey = 'panel_order';
+  late List<int> _panelOrder;
+
   final TextEditingController _controller = TextEditingController();
 
-  // Keys
   static const String _tasksKey = 'tasks_key';
   static const String _bgKey = 'bg_path';
   static const String _panelsKey = 'revealed_panels';
   static const String _galleryKey = 'cleared_gallery';
 
   // Panel grid
-  static const int rows = 6;
+  static const int rows = 5;
   static const int cols = 10;
 
   @override
@@ -94,9 +91,9 @@ class _HomeShellState extends State<HomeShell> {
     await _loadBackground();
     await _loadGallery();
     await _loadProgress();
+    await _loadOrCreatePanelOrder();
   }
 
-  // ===== Tasks =====
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getStringList(_tasksKey);
@@ -174,7 +171,6 @@ class _HomeShellState extends State<HomeShell> {
     await prefs.setInt(_progressKey, _progressCount);
   }
 
-  // ===== Background =====
   Future<void> _pickBackground() async {
     final result = await FilePicker.platform.pickFiles(type: FileType.image);
     if (result == null) return;
@@ -203,31 +199,48 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  // ===== Panels =====
-  /*void _revealPanel() {
+  Future<void> _loadOrCreatePanelOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_panelOrderKey);
+
     final total = rows * cols;
 
-    final hidden = List.generate(
-      total,
-      (i) => i,
-    ).where((i) => !_revealedPanels.contains(i)).toList();
+    if (saved != null && saved.length == total) {
+      // 保存済みの順序を復元
+      setState(() {
+        _panelOrder = saved.map(int.parse).toList();
+      });
+      return;
+    }
 
-    if (hidden.isEmpty) return;
-
-    hidden.shuffle();
-    final selected = hidden.first;
-
+    // 無ければ新しく作成して保存
+    final order = List.generate(total, (i) => i)..shuffle();
     setState(() {
-      _revealedPanels.add(selected);
+      _panelOrder = order;
     });
 
-    _savePanels();
+    await prefs.setStringList(
+      _panelOrderKey,
+      order.map((e) => e.toString()).toList(),
+    );
+  }
 
-    // ✅ 全開になったらクリア処理
-    if (_revealedPanels.length == total) {
-      _onAllPanelsCleared();
-    }
-  }*/
+  Future<void> _resetStateWithNewOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    final total = rows * cols;
+    final order = List.generate(total, (i) => i)..shuffle();
+
+    setState(() {
+      _panelOrder = order;
+      _progressCount = 0;
+    });
+
+    await prefs.setStringList(
+      _panelOrderKey,
+      order.map((e) => e.toString()).toList(),
+    );
+    await _saveProgress();
+  }
 
   Future<void> _savePanels() async {
     final prefs = await SharedPreferences.getInstance();
@@ -249,7 +262,6 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  // ===== Gallery =====
   Future<void> _loadGallery() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getStringList(_galleryKey);
@@ -267,7 +279,6 @@ class _HomeShellState extends State<HomeShell> {
     await prefs.setStringList(_galleryKey, _clearedImages);
   }
 
-  // ✅ 全パネルが開いたときの処理
   Future<void> _onAllPanelsCleared() async {
     // いまの背景画像をギャラリーに保存
     final bg = _backgroundImagePath;
@@ -305,7 +316,7 @@ class _HomeShellState extends State<HomeShell> {
 
     if (chooseNext != true) {
       // あとで選ぶ：Progressのまま（全開状態）
-      // ギャラリーは保存済みなのでOK
+      // ギャラリーは保存済み
       return;
     }
 
@@ -317,16 +328,14 @@ class _HomeShellState extends State<HomeShell> {
 
     setState(() {
       _backgroundImagePath = newPath;
-      _revealedPanels.clear(); // ✅ 次ステージ：パネルをリセット
-      _index = 1; // Progressタブへ
     });
+    await _resetStateWithNewOrder();
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_bgKey, newPath);
     await _savePanels(); // 空を保存
   }
 
-  // ===== Dev reset (あなたが入れている場合に合わせて維持) =====
   Future<void> _clearAllData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
@@ -366,7 +375,7 @@ class _HomeShellState extends State<HomeShell> {
               tooltip: '背景画像を選ぶ',
             ),
 
-          // 開発用リセット（常に表示）
+          // 開発用リセット
           IconButton(
             icon: const Icon(Icons.delete_forever, color: Colors.white),
             onPressed: _clearAllData,
@@ -386,11 +395,10 @@ class _HomeShellState extends State<HomeShell> {
           ),
           ProgressPage(
             backgroundImagePath: _backgroundImagePath,
-            revealedPanels: _revealedPanels,
             rows: rows,
             cols: cols,
-            completedCount: _progressCount,
-            totalCount: _tasks.length,
+            panelOrder: _panelOrder,
+            revealedCount: _progressCount,
           ),
           GalleryPage(images: _clearedImages),
         ],
@@ -411,7 +419,6 @@ class _HomeShellState extends State<HomeShell> {
   }
 }
 
-/// ===== Page: ToDo =====
 class TodoPage extends StatelessWidget {
   const TodoPage({
     super.key,
@@ -487,45 +494,38 @@ class TodoPage extends StatelessWidget {
   }
 }
 
-/// ===== Page: Progress =====
 class ProgressPage extends StatelessWidget {
   const ProgressPage({
     super.key,
     required this.backgroundImagePath,
-    required this.revealedPanels,
+    required this.panelOrder,
     required this.rows,
     required this.cols,
-    required this.completedCount,
-    required this.totalCount,
+    required this.revealedCount,
   });
 
   final String? backgroundImagePath;
-  final Set<int> revealedPanels;
+  final List<int> panelOrder;
   final int rows;
   final int cols;
-  final int completedCount;
-  final int totalCount;
+  final int revealedCount;
 
   @override
   Widget build(BuildContext context) {
     final totalPanels = rows * cols;
-    final revealedCount = revealedPanels.length;
+
+    // index -> そのパネルが何番目に開くか（O(1)判定用）
+    final rank = List<int>.filled(totalPanels, 0);
+    for (int i = 0; i < panelOrder.length; i++) {
+      rank[panelOrder[i]] = i;
+    }
 
     return Column(
       children: [
-        // 進捗表示（モチベ用）
         Padding(
           padding: const EdgeInsets.all(12.0),
-          child: Row(
-            children: [
-              Text('Tasks: $completedCount / $totalCount'),
-              const SizedBox(width: 16),
-              Text('Panels: $revealedCount / $totalPanels'),
-            ],
-          ),
+          child: Text('Panels: $revealedCount / $totalPanels'),
         ),
-
-        // 背景 + 黒パネル
         Expanded(
           child: Stack(
             fit: StackFit.expand,
@@ -549,7 +549,7 @@ class ProgressPage extends StatelessWidget {
                       crossAxisCount: cols,
                     ),
                     itemBuilder: (context, index) {
-                      final isRevealed = index < completedCount;
+                      final isRevealed = rank[index] < revealedCount; // ✅ここが核心
                       return Container(
                         decoration: BoxDecoration(
                           color: isRevealed ? Colors.transparent : Colors.black,
@@ -568,7 +568,6 @@ class ProgressPage extends StatelessWidget {
   }
 }
 
-/// ===== Page: Gallery =====
 class GalleryPage extends StatelessWidget {
   const GalleryPage({super.key, required this.images});
 
