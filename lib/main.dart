@@ -43,7 +43,7 @@ class Todo {
   }
 }
 
-/// ===== HomeShell (tabs + state) =====
+/// ===== HomeShell: state + tabs =====
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -59,14 +59,16 @@ class _HomeShellState extends State<HomeShell> {
   final List<Todo> _tasks = [];
   final Set<int> _revealedPanels = {};
   String? _backgroundImagePath;
+  final List<String> _clearedImages = [];
 
-  // UI controller
+  // UI
   final TextEditingController _controller = TextEditingController();
 
   // Keys
   static const String _tasksKey = 'tasks_key';
   static const String _bgKey = 'bg_path';
   static const String _panelsKey = 'revealed_panels';
+  static const String _galleryKey = 'cleared_gallery';
 
   // Panel grid
   static const int rows = 6;
@@ -88,8 +90,10 @@ class _HomeShellState extends State<HomeShell> {
     await _loadTasks();
     await _loadPanels();
     await _loadBackground();
+    await _loadGallery();
   }
 
+  // ===== Tasks =====
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getStringList(_tasksKey);
@@ -134,22 +138,53 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _toggleTask(int index, bool value) async {
-    final wasDone = _tasks[index].done;
-
     setState(() {
       _tasks[index].done = value;
     });
 
-    // 「未完了 → 完了」に変わった瞬間だけパネルをめくる
-    if (!wasDone && value) {
-      _revealPanel();
-    }
-
     await _saveTasks();
+
+    final completed = _tasks.where((t) => t.done).length;
+    final totalPanels = rows * cols;
+
+    if (completed >= totalPanels) {
+      _onAllPanelsCleared();
+    }
   }
 
-  void _revealPanel() {
+  // ===== Background =====
+  Future<void> _pickBackground() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null) return;
+
+    final path = result.files.single.path;
+    if (path == null) return;
+
+    setState(() {
+      _backgroundImagePath = path;
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_bgKey, path);
+  }
+
+  Future<void> _loadBackground() async {
+    final prefs = await SharedPreferences.getInstance();
+    final path = prefs.getString(_bgKey);
+    if (path == null || path.isEmpty) return;
+
+    // ファイルが消えている可能性に備える
+    if (!File(path).existsSync()) return;
+
+    setState(() {
+      _backgroundImagePath = path;
+    });
+  }
+
+  // ===== Panels =====
+  /*void _revealPanel() {
     final total = rows * cols;
+
     final hidden = List.generate(
       total,
       (i) => i,
@@ -165,7 +200,12 @@ class _HomeShellState extends State<HomeShell> {
     });
 
     _savePanels();
-  }
+
+    // ✅ 全開になったらクリア処理
+    if (_revealedPanels.length == total) {
+      _onAllPanelsCleared();
+    }
+  }*/
 
   Future<void> _savePanels() async {
     final prefs = await SharedPreferences.getInstance();
@@ -187,34 +227,84 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  Future<void> _pickBackground() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image);
-    if (result == null) return;
-
-    final path = result.files.single.path;
-    if (path == null) return;
+  // ===== Gallery =====
+  Future<void> _loadGallery() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_galleryKey);
+    if (saved == null) return;
 
     setState(() {
-      _backgroundImagePath = path;
-    });
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_bgKey, path);
-  }
-
-  Future<void> _loadBackground() async {
-    final prefs = await SharedPreferences.getInstance();
-    final path = prefs.getString(_bgKey);
-    if (path == null || path.isEmpty) return;
-
-    // 画像が消されていた場合に備えて存在確認（任意だが安全）
-    if (!File(path).existsSync()) return;
-
-    setState(() {
-      _backgroundImagePath = path;
+      _clearedImages
+        ..clear()
+        ..addAll(saved.where((p) => File(p).existsSync()));
     });
   }
 
+  Future<void> _saveGallery() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_galleryKey, _clearedImages);
+  }
+
+  // ✅ 全パネルが開いたときの処理
+  Future<void> _onAllPanelsCleared() async {
+    // いまの背景画像をギャラリーに保存
+    final bg = _backgroundImagePath;
+    if (bg != null && bg.isNotEmpty && File(bg).existsSync()) {
+      if (!_clearedImages.contains(bg)) {
+        setState(() {
+          _clearedImages.add(bg);
+        });
+        await _saveGallery();
+      }
+    }
+
+    if (!mounted) return;
+
+    // クリア通知 + 次の画像選択へ
+    final chooseNext = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('クリア！'),
+          content: const Text('すべてのパネルが開きました。\n次の背景画像を選びますか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('あとで'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('選ぶ'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (chooseNext != true) {
+      // あとで選ぶ：Progressのまま（全開状態）
+      // ギャラリーは保存済みなのでOK
+      return;
+    }
+
+    // 次の背景画像を選択
+    final picked = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (picked == null || picked.files.single.path == null) return;
+
+    final newPath = picked.files.single.path!;
+
+    setState(() {
+      _backgroundImagePath = newPath;
+      _revealedPanels.clear(); // ✅ 次ステージ：パネルをリセット
+      _index = 1; // Progressタブへ
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_bgKey, newPath);
+    await _savePanels(); // 空を保存
+  }
+
+  // ===== Dev reset (あなたが入れている場合に合わせて維持) =====
   Future<void> _clearAllData() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
@@ -223,30 +313,37 @@ class _HomeShellState extends State<HomeShell> {
       _tasks.clear();
       _revealedPanels.clear();
       _backgroundImagePath = null;
+      _clearedImages.clear();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final isTodoTab = _index == 0;
+    final isProgressTab = _index == 1;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          isTodoTab ? 'ToDo List' : 'Progress',
+          isTodoTab
+              ? 'ToDo List'
+              : isProgressTab
+              ? 'Progress'
+              : 'Gallery',
           style: const TextStyle(color: Colors.white),
         ),
         backgroundColor: Colors.lightBlue,
         surfaceTintColor: Colors.transparent,
         actions: [
-          // 画像ページのときだけ「背景変更」ボタンを出す
-          if (!isTodoTab)
+          // Progressタブのときだけ背景選択
+          if (isProgressTab)
             IconButton(
               icon: const Icon(Icons.image, color: Colors.white),
               onPressed: _pickBackground,
               tooltip: '背景画像を選ぶ',
             ),
 
+          // 開発用リセット（常に表示）
           IconButton(
             icon: const Icon(Icons.delete_forever, color: Colors.white),
             onPressed: _clearAllData,
@@ -272,6 +369,7 @@ class _HomeShellState extends State<HomeShell> {
             completedCount: _tasks.where((t) => t.done).length,
             totalCount: _tasks.length,
           ),
+          GalleryPage(images: _clearedImages),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -280,6 +378,10 @@ class _HomeShellState extends State<HomeShell> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.checklist), label: 'ToDo'),
           BottomNavigationBarItem(icon: Icon(Icons.image), label: 'Progress'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.collections),
+            label: 'Gallery',
+          ),
         ],
       ),
     );
@@ -388,7 +490,7 @@ class ProgressPage extends StatelessWidget {
 
     return Column(
       children: [
-        // 進捗テキスト（上に少し情報を出すとモチベに効く）
+        // 進捗表示（モチベ用）
         Padding(
           padding: const EdgeInsets.all(12.0),
           child: Row(
@@ -400,7 +502,7 @@ class ProgressPage extends StatelessWidget {
           ),
         ),
 
-        // 背景と黒パネル
+        // 背景 + 黒パネル
         Expanded(
           child: Stack(
             fit: StackFit.expand,
@@ -424,7 +526,7 @@ class ProgressPage extends StatelessWidget {
                       crossAxisCount: cols,
                     ),
                     itemBuilder: (context, index) {
-                      final isRevealed = revealedPanels.contains(index);
+                      final isRevealed = index < completedCount;
                       return Container(
                         decoration: BoxDecoration(
                           color: isRevealed ? Colors.transparent : Colors.black,
@@ -439,6 +541,63 @@ class ProgressPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// ===== Page: Gallery =====
+class GalleryPage extends StatelessWidget {
+  const GalleryPage({super.key, required this.images});
+
+  final List<String> images;
+
+  @override
+  Widget build(BuildContext context) {
+    if (images.isEmpty) {
+      return const Center(
+        child: Text('まだクリアした画像がありません', style: TextStyle(color: Colors.grey)),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: images.length,
+      itemBuilder: (context, index) {
+        final path = images[index];
+        return InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => FullscreenImagePage(path: path),
+              ),
+            );
+          },
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.file(File(path), fit: BoxFit.cover),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class FullscreenImagePage extends StatelessWidget {
+  const FullscreenImagePage({super.key, required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Cleared Image')),
+      body: Center(child: Image.file(File(path), fit: BoxFit.contain)),
     );
   }
 }
