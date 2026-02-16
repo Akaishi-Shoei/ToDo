@@ -215,6 +215,17 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
+  Future<void> _clearAllData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+
+    setState(() {
+      _tasks.clear();
+      _revealedPanels.clear();
+      _backgroundImagePath = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTodoTab = _index == 0;
@@ -235,6 +246,12 @@ class _HomeShellState extends State<HomeShell> {
               onPressed: _pickBackground,
               tooltip: '背景画像を選ぶ',
             ),
+
+          IconButton(
+            icon: const Icon(Icons.delete_forever, color: Colors.white),
+            onPressed: _clearAllData,
+            tooltip: 'データを全削除',
+          ),
         ],
       ),
       body: IndexedStack(
